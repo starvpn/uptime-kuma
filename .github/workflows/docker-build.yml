@@ -1,0 +1,148 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: uptime-kuma
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build Docker Base Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./docker/debian-base.dockerfile
+        platforms: linux/amd64,linux/arm64,linux/arm/v7
+        target: base2
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:base2
+        push: ${{ github.event_name != 'pull_request' }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build Go Builder Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./docker/builder-go.dockerfile
+        platforms: linux/amd64,linux/arm64,linux/arm/v7
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:builder-go
+        push: ${{ github.event_name != 'pull_request' }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./docker/dockerfile
+        platforms: linux/amd64,linux/arm64,linux/arm/v7
+        target: release
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push rootless Docker image
+      if: github.event_name != 'pull_request'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./docker/dockerfile
+        platforms: linux/amd64,linux/arm64,linux/arm/v7
+        target: rootless
+        push: true
+        tags: |
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:rootless
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-rootless
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  build-nightly:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push nightly Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./docker/dockerfile
+        platforms: linux/amd64,linux/arm64,linux/arm/v7
+        target: nightly
+        push: true
+        tags: |
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build and push nightly-rootless Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./docker/dockerfile
+        platforms: linux/amd64,linux/arm64,linux/arm/v7
+        target: nightly-rootless
+        push: true
+        tags: |
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-rootless
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${{ github.sha }}-rootless
+        cache-from: type=gha
+        cache-to: type=gha,mode=max 
