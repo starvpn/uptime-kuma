@@ -71,7 +71,7 @@ async function createTables() {
             .references("id").inTable("user")
             .onDelete("SET NULL")
             .onUpdate("CASCADE");
-        table.integer("interval").notNullable().defaultTo(20);
+        table.integer("interval").notNullable().defaultTo(1);
         table.text("url");
         table.string("type", 20);
         table.integer("weight").defaultTo(2000);
