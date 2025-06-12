@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: docker.io
+  REGISTRY: xianwei2022
   IMAGE_NAME: uptime-kuma-ld
 
 jobs:
